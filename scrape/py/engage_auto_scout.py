@@ -59,11 +59,14 @@ def build_options():
     opts.add_argument("--disable-dev-shm-usage")
     opts.add_argument("--disable-extensions")
     opts.add_argument("--remote-debugging-port=0")
+
+    # 必ずユニークなuser-data-dirを指定する
+    unique_user_data_dir = os.path.join(tempfile.gettempdir(), f"engage_profile_{uuid.uuid4().hex}")
+    opts.add_argument(f"--user-data-dir={unique_user_data_dir}")
+
     return opts
 
 def create_driver():
-    global user_data_dir
-    # Edge の残骸プロセスを必ず殺してから試す
     subprocess.run(
         "taskkill /F /IM msedge.exe /T",
         shell=True,
@@ -71,48 +74,25 @@ def create_driver():
         stderr=subprocess.DEVNULL
     )
 
-    user_data_dir = os.path.join(tempfile.gettempdir(),
-                               f"engage_profile_{uuid.uuid4().hex}")
     opts = build_options()
-    opts.add_argument(f"--user-data-dir={user_data_dir}")
-    time.sleep(1)
-    logger.info(f"user_data_dir(child) = {user_data_dir}")
-    time.sleep(5)
+
+    # 事前にインストール済みのdriverを使う
+    driver_path = "drivers/msedgedriver.exe"  # 例: exeと同じフォルダにdriversフォルダを作る
+
+    if not os.path.exists(driver_path):
+        raise RuntimeError(f"ドライバが見つかりません: {driver_path}")
+
     try:
         drv = webdriver.Edge(
-            service=Service(EdgeChromiumDriverManager().install(),
-                            log_path=os.devnull),
+            service=Service(driver_path, log_path=os.devnull),
             options=opts
         )
         return drv
-    except Exception:
-        # 失敗したらフォルダを掃除して投げ直す
-        shutil.rmtree(user_data_dir, ignore_errors=True)
+    except Exception as e:
+        logger.error(f"Edge起動失敗: {e}")
         raise
 
-for attempt in range(3):
-    try:
-        driver = create_driver()
-        break
-    except SessionNotCreatedException as e:
-        logger.warning(f"プロファイル競合で再試行 {attempt+1}/3: {e}")
-        subprocess.run(
-            "taskkill /F /IM msedge.exe /T",
-            shell=True,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL
-        )
-        time.sleep(2)
-else:
-    logger.warning("フォールバック: user-data-dir なしで Edge を起動します")
-    opts = build_options()          # この opts には user-data-dir を付けない
-    driver = webdriver.Edge(
-        service=Service(EdgeChromiumDriverManager().install(),
-                        log_path=os.devnull),
-        options=opts
-    )
-
-# driver が確定したあとに wait を作成
+driver = create_driver()
 wait = WebDriverWait(driver, 10)
 
 def login():
@@ -297,8 +277,7 @@ def process_candidates():
 
 # 終了時に後片付け（1 回だけ登録）
 def _cleanup():
-    if 'user_data_dir' in globals() and os.path.exists(user_data_dir):
-        shutil.rmtree(user_data_dir, ignore_errors=True)
+    logger.info("終了処理（特別なクリーンアップは不要）")
 
 # 実行開始
 try:
