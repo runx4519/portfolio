@@ -1,0 +1,7 @@
+{
+  "email": "your_email@example.com",
+  "password": "your_password",
+  "max_age": 35,
+  "headless": true
+}
+  
