@@ -252,6 +252,25 @@ def select_dropdowns():
 def process_candidates():
     global approach_count
     logger.info("候補者処理開始")
+    # さらに読み込むボタンを押せる限り押す
+    while True:
+        try:
+            show_more = WebDriverWait(driver, 3).until(
+                EC.presence_of_element_located((By.ID, "js_candidateShowMore"))
+            )
+            driver.execute_script("arguments[0].scrollIntoView(true);", show_more)
+            driver.execute_script("arguments[0].click();", show_more)
+            logger.info("さらに読み込むボタン押下")
+            time.sleep(2)  # 読み込み待機
+        except Exception:
+            logger.info("『さらに読み込む』ボタンが存在しないか、これ以上押せないため次へ進みます。")
+            break
+
+    time.sleep(2)
+    candidates = driver.find_elements(By.XPATH, '//div[@class="main"]')
+    if not candidates:
+        logger.info("対象候補者が見つかりませんでした。処理終了。")
+        return
     time.sleep(3)
     candidates = driver.find_elements(By.XPATH, '//div[@class="main"]')
     if not candidates:
@@ -280,9 +299,9 @@ def process_candidates():
                 time.sleep(2)
                 approach_buttons = driver.find_elements(By.XPATH, '//a[contains(@class, "js_candidateApproach")]')
                 if approach_buttons:
-                     driver.execute_script("arguments[0].click();", approach_buttons[0])
-                     approach_count += 1
-                     logger.info("会ってみたいボタン押下（JavaScript実行）")
+                    driver.execute_script("arguments[0].click();", approach_buttons[0])
+                    approach_count += 1
+                    logger.info("会ってみたいボタン押下（JavaScript実行）")
                 else:
                      logger.warning("会ってみたいボタンが見つかりませんでした。")
                 time.sleep(1)
