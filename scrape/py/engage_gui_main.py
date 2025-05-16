@@ -13,12 +13,12 @@ from selenium.webdriver.edge.service import Service
 from webdriver_manager.microsoft import EdgeChromiumDriverManager
 from selenium.webdriver.common.action_chains import ActionChains
 from datetime import timedelta
+from selenium.common.exceptions import TimeoutException
 
 class EngageApp(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("Engage 自動化ツール")
-        self.geometry("600x700")
         self.job_titles = []
         self.load_config_options()
         self.create_variables()
@@ -49,19 +49,37 @@ class EngageApp(tk.Tk):
         self.date_to = tk.StringVar(value=datetime.now().strftime("%Y-%m-%d"))
 
     def create_first_screen(self):
+        self.geometry("600x200")
         frame = ttk.Frame(self)
         frame.pack(padx=10, pady=10, fill=tk.BOTH, expand=True)
 
-        ttk.Label(frame, text="会社名:").pack(anchor=tk.W)
-        ttk.Entry(frame, textvariable=self.company_name).pack(fill=tk.X)
+        # 会社名
+        row1 = ttk.Frame(frame)
+        row1.pack(anchor=tk.W, pady=5)
+        ttk.Label(row1, text="会社名:", width=10).pack(side=tk.LEFT)
+        ttk.Entry(row1, textvariable=self.company_name, width=30).pack(side=tk.LEFT, padx=5)
 
-        ttk.Label(frame, text="メールアドレス:").pack(anchor=tk.W)
-        ttk.Entry(frame, textvariable=self.email).pack(fill=tk.X)
+        # メールアドレス
+        row2 = ttk.Frame(frame)
+        row2.pack(anchor=tk.W, pady=5)
+        ttk.Label(row2, text="メールアドレス:", width=10).pack(side=tk.LEFT)
+        ttk.Entry(row2, textvariable=self.email, width=30).pack(side=tk.LEFT, padx=5)
 
-        ttk.Label(frame, text="パスワード:").pack(anchor=tk.W)
-        ttk.Entry(frame, textvariable=self.password, show="*").pack(fill=tk.X)
+        # パスワード
+        row3 = ttk.Frame(frame)
+        row3.pack(anchor=tk.W, pady=5)
+        ttk.Label(row3, text="パスワード:", width=10).pack(side=tk.LEFT)
+        ttk.Entry(row3, textvariable=self.password, width=30, show="*").pack(side=tk.LEFT, padx=5)
 
-        ttk.Button(frame, text="ログイン", command=self.initialize_driver).pack(pady=10)
+        # ログインボタン
+        ttk.Button(frame, text="ログイン", command=self.on_login_button_click).pack(pady=10)
+
+    def on_login_button_click(self):
+        if not self.initialize_driver():
+            return
+
+        self.get_job_titles()
+        self.create_second_screen()
 
     def initialize_driver(self):
         opts = EdgeOptions()
@@ -76,25 +94,30 @@ class EngageApp(tk.Tk):
             self.driver.find_element(By.ID, "password").send_keys(self.password.get())
             self.driver.find_element(By.ID, "login-button").click()
 
-        try:
-            self.driver.get("https://en-gage.net/company/manage/")
-            self.log_window("リロードでポップアップ抑制を試行中...")
-            time.sleep(2)
-
+            # ログイン失敗チェック
             try:
-                modal_close = self.driver.find_element(By.CSS_SELECTOR, "a.js_modalX.js_modalXChain")
-                self.driver.execute_script("arguments[0].click();", modal_close)
-                self.log_window("ポップアップを js_modalX で閉じました。")
-                time.sleep(1)
-            except Exception:
-                self.log_window("js_modalX が見つかりませんでした（ポップアップ非表示とみなす）")
+                WebDriverWait(self.driver, 3).until(
+                    EC.presence_of_element_located((By.ID, "login-error-area"))
+                )
+                messagebox.showerror("ログインエラー", "「メールアドレス」「パスワード」を正しく入力してください。")
+                self.driver.quit()
+                return False
+            except TimeoutException:
+                self.driver.get("https://en-gage.net/company/manage/")
+                self.log_window("リロードでポップアップ抑制を試行中...")
+                time.sleep(2)
 
-            self.close_popups()
-            self.get_job_titles()
-            self.create_second_screen()
+                try:
+                    modal_close = self.driver.find_element(By.CSS_SELECTOR, "a.js_modalX.js_modalXChain")
+                    self.driver.execute_script("arguments[0].click();", modal_close)
+                    self.log_window("ポップアップを js_modalX で閉じました。")
+                    time.sleep(1)
+                except Exception:
+                    self.log_window("js_modalX が見つかりませんでした（ポップアップ非表示とみなす）")
 
-        except Exception as e:
-            messagebox.showerror("エラー", f"ログイン中にエラーが発生しました: {e}")
+                self.close_popups()
+                
+                return True
 
     def close_popups(self):
         self.log_window("ポップアップ閉じ処理開始")
@@ -193,34 +216,41 @@ class EngageApp(tk.Tk):
         self.create_second_screen()
 
     def create_second_screen(self):
-        for widget in self.winfo_children():
-            widget.destroy()
-
+        self.geometry("1000x600")
+        self.clear_screen()
         frame = ttk.Frame(self)
         frame.pack(padx=10, pady=10, fill=tk.BOTH, expand=True)
 
-        for i, var in enumerate([self.job1, self.job2, self.job3], start=1):
-            ttk.Label(frame, text=f"求人情報 {i}:").pack(anchor=tk.W)
-            ttk.Combobox(frame, textvariable=var, values=self.job_titles).pack(fill=tk.X)
+        ttk.Label(frame, text=f"会社名：{self.company_name.get()}", font=("Arial", 14, "bold")).pack(pady=(10, 5))
 
-        for i, var in enumerate([self.pref1, self.pref2, self.pref3], start=1):
-            ttk.Label(frame, text=f"現住所 {i}:").pack(anchor=tk.W)
-            ttk.Combobox(frame, textvariable=var, values=self.pref_options).pack(fill=tk.X)
+        # 入力エリアの親Frame（grid配置）
+        input_frame = ttk.Frame(frame)
+        input_frame.pack(anchor="w")
 
-        for i, var in enumerate([self.occ1, self.occ2, self.occ3], start=1):
-            ttk.Label(frame, text=f"経験職種 {i}:").pack(anchor=tk.W)
-            ttk.Combobox(frame, textvariable=var, values=self.occ_options).pack(fill=tk.X)
+        # 求人情報
+        self.add_label_combobox_row(input_frame, "求人情報", [self.job1, self.job2, self.job3], self.job_titles, row_start=0)
+        # 現住所
+        self.add_label_combobox_row(input_frame, "現住所", [self.pref1, self.pref2, self.pref3], self.pref_options, row_start=1)
+        # 経験職種
+        self.add_label_combobox_row(input_frame, "経験職種", [self.occ1, self.occ2, self.occ3], self.occ_options, row_start=2)
 
-        ttk.Label(frame, text="候補者年齢（以下）:").pack(anchor=tk.W)
-        ttk.Entry(frame, textvariable=self.max_age).pack(fill=tk.X)
+        # 候補者年齢
+        age_frame = ttk.Frame(frame)
+        age_frame.pack(anchor="w", pady=5)
+        ttk.Label(age_frame, text="候補者年齢（以下）：").pack(side=tk.LEFT)
+        ttk.Entry(age_frame, textvariable=self.max_age, width=10).pack(side=tk.LEFT, padx=5)
 
-        ttk.Label(frame, text="実行期間 From（例: 2025-05-08）:").pack(anchor=tk.W)
-        ttk.Entry(frame, textvariable=self.date_from).pack(fill=tk.X)
+        # 実行期間 From/To
+        for label, var in [("実行期間 From（例: 2025-05-08）：", self.date_from), ("実行期間 To（例: 2025-05-08）：", self.date_to)]:
+            f = ttk.Frame(frame)
+            f.pack(anchor="w", pady=5)
+            ttk.Label(f, text=label).pack(side=tk.LEFT)
+            ttk.Entry(f, textvariable=var, width=15).pack(side=tk.LEFT, padx=5)
 
-        ttk.Label(frame, text="実行期間 To（例: 2025-05-08）:").pack(anchor=tk.W)
-        ttk.Entry(frame, textvariable=self.date_to).pack(fill=tk.X)
-
+        # 実行ボタン
         ttk.Button(frame, text="実行", command=self.start_automation_thread).pack(pady=10)
+
+        # ログ出力
         self.log_box = tk.Text(frame, height=15)
         self.log_box.pack(fill=tk.BOTH, expand=True)
 
@@ -258,14 +288,14 @@ class EngageApp(tk.Tk):
             messagebox.showwarning("入力エラー", "候補者年齢は正の整数で入力してください")
             return False
 
-        if all(j in [""] for j in [self.job1.get(), self.job2.get(), self.job3.get()]):
-            messagebox.showwarning("入力エラー", "求人情報はいずれか1つ以上選択してください")
+        if self.job1.get().strip() == "":
+            messagebox.showwarning("入力エラー", "求人情報1は必須です")
             return False
-        if all(p in [""] for p in [self.pref1.get(), self.pref2.get(), self.pref3.get()]):
-            messagebox.showwarning("入力エラー", "現住所はいずれか1つ以上選択してください")
+        if self.pref1.get().strip() == "":
+            messagebox.showwarning("入力エラー", "現住所1は必須です")
             return False
-        if all(o in [""] for o in [self.occ1.get(), self.occ2.get(), self.occ3.get()]):
-            messagebox.showwarning("入力エラー", "経験職種はいずれか1つ以上選択してください")
+        if self.occ1.get().strip() == "":
+            messagebox.showwarning("入力エラー", "経験職種1は必須です")
             return False
 
         return True
@@ -413,10 +443,19 @@ class EngageApp(tk.Tk):
     def on_closing(self):
         try:
             if hasattr(self, "driver"):
-                self.driver.quit()  # Edgeが生きていれば閉じる
+                threading.Thread(target=self.driver.quit, daemon=True).start()
         except:
             pass
         self.destroy()
+
+    def clear_screen(self):
+        for widget in self.winfo_children():
+            widget.destroy()
+
+    def add_label_combobox_row(self, parent, label_prefix, variables, values, row_start):
+        for i, var in enumerate(variables):
+            ttk.Label(parent, text=f"{label_prefix} {i+1}:").grid(row=row_start, column=i*2, sticky="w", padx=5, pady=5)
+            ttk.Combobox(parent, textvariable=var, values=values, width=35).grid(row=row_start, column=i*2+1, padx=5, pady=5)
 
 if __name__ == "__main__":
     app = EngageApp()
