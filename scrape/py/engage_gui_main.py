@@ -14,7 +14,6 @@ from webdriver_manager.microsoft import EdgeChromiumDriverManager
 from selenium.webdriver.common.action_chains import ActionChains
 from datetime import timedelta
 from selenium.common.exceptions import TimeoutException
-from selenium.webdriver.common.keys import Keys
 
 class EngageApp(tk.Tk):
     def __init__(self):
@@ -36,12 +35,12 @@ class EngageApp(tk.Tk):
             data = json.load(f)
 
         # 名称リスト（プルダウン表示用）
-        self.pref_names = list(data["prefectures"].keys())
-        self.occ_names  = list(data["occupations"].keys())
+        self.pref_names = list(data["prefectures"].values())
+        self.occ_names = list(data["occupations"].values())
 
         # 名称 → ID 辞書（検索条件用）
         self.pref_name_id_map = {v: k for k, v in data["prefectures"].items()}
-        self.occ_name_id_map  = {v: k for k, v in data["occupations"].items()}
+        self.occ_name_id_map = {v: k for k, v in data["occupations"].items()}
 
     def create_variables(self):
         self.company_name = tk.StringVar()
@@ -221,10 +220,12 @@ class EngageApp(tk.Tk):
         self.log_box.pack(fill=tk.BOTH, expand=True)
 
     def log_window(self, message):
-        now = datetime.now().strftime("%H:%M:%S")
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         if hasattr(self, "log_box"):
+            self.log_box.config(state="normal")
             self.log_box.insert(tk.END, f"[{now}] {message}\n")
             self.log_box.see(tk.END)
+            self.log_box.config(state="disabled") 
         else:
             print(f"[{now}] {message}")  # 初期画面では print にフォールバック
 
@@ -296,10 +297,8 @@ class EngageApp(tk.Tk):
                     pref = prefs[i]
                     occ = occs[i]
 
-                    self.log_window(f"[DEBUG] 条件{i+1}: {job}, {pref}, {occ}")
-
-                    if "選択しない" in (job, pref, occ):
-                        self.log_window(f"{i+1}回目: 条件が不完全なためスキップ（{job}, {pref}, {occ}）")
+                    if job == "" or pref == "" or occ == "":
+                        self.log_window(f"{i+1}回目: 入力が不足しているためスキップ（{job}, {pref}, {occ}）")
                         continue
 
                     self.log_window(f"{i+1}回目: 求人={job}, 現住所={pref}, 職種={occ} で処理開始")
@@ -307,97 +306,95 @@ class EngageApp(tk.Tk):
                     self.log_window(f"{i+1}回目: 処理完了")
 
                 loop_count += 1
-                if datetime.now() + timedelta(minutes=20) > to_time:
+                # if datetime.now() + timedelta(minutes=20) > to_time:
+                #     break
+                # self.log_window("20分待機します...")
+                # time.sleep(20 * 60)
+                if datetime.now() + timedelta(minutes=1) > to_time:
                     break
-                self.log_window("20分待機します...")
-                time.sleep(20 * 60)
+                self.log_window("1分待機します...")
+                time.sleep(1 * 60)
             self.log_window("実行期間終了。処理を終了します。")
         except Exception as e:
             self.log_window(f"処理中にエラー: {e}")
         self.log_window("処理を終了しました。")
 
     def run_condition_set(self, job_name, pref_name, occ_name):
-        self.log_window(f"条件: {job_name} × {pref_name} × {occ_name} を処理中...")
+        self.log_window(f"▼ 条件適用開始：求人={job_name}、現住所={pref_name}、職種={occ_name}")
         try:
             # 求人IDを取得
             job_id = self.job_title_id_map.get(job_name)
-            if not job_id:
+            if job_id:
+                modal_button = self.wait.until(
+                    EC.element_to_be_clickable((By.CSS_SELECTOR, "div.switch.js_modalOpen"))
+                )
+                self.driver.execute_script("arguments[0].click();", modal_button)
+                self.log_window("求人情報モーダルを開きました")
+                time.sleep(1)
+
+                job_elements = self.wait.until(
+                    EC.presence_of_all_elements_located((By.CSS_SELECTOR, "a.js_optionWorkId"))
+                )
+                for i, job in enumerate(job_elements):
+                    job_text = job.get_attribute("innerText").strip()
+                    data_id = job.get_attribute("data-work_id")
+                    self.log_window(f"取得求人候補[{i+1}]: {job_text}（ID: {data_id}）")
+                    if data_id == job_id:
+                        self.driver.execute_script("arguments[0].click();", job)
+                        self.log_window(f"求人を選択: {job_text}")
+
+                        try:
+                            close_buttons = self.driver.find_elements(By.CLASS_NAME, "js_modalClose")
+                            for btn in close_buttons:
+                                try:
+                                    self.driver.execute_script("arguments[0].click();", btn)
+                                except:
+                                    pass
+                            time.sleep(1)  # モーダル閉じ待機
+                        except Exception as e:
+                            self.log_window(f"モーダルクローズ失敗: {e}")
+
+                        break
+            else:
                 self.log_window(f"求人IDが見つかりませんでした: {job_name}")
-                return
-
-            # 求人情報モーダルを開く
-            modal_button = self.wait.until(
-                EC.element_to_be_clickable((By.CSS_SELECTOR, "div.switch.js_modalOpen"))
-            )
-            self.driver.execute_script("arguments[0].click();", modal_button)
-            self.log_window("求人情報モーダルを開きました")
-            time.sleep(1)
-
-            # 求人一覧を取得してID一致で自動選択
-            job_elements = self.wait.until(
-                EC.presence_of_all_elements_located((By.CSS_SELECTOR, "a.js_optionWorkId"))
-            )
-            found = False
-            for i, job in enumerate(job_elements):
-                job_text = job.text.strip()
-                data_id = job.get_attribute("data-work_id")
-                self.log_window(f"取得求人候補[{i+1}]: {job_text}（ID: {data_id}）")
-                if data_id == job_id:
-                    self.driver.execute_script("arguments[0].click();", job)
-                    self.log_window(f"求人を選択: {job_text}")
-                    found = True
-                    break
-
-            if not found:
-                self.log_window(f"求人IDが一致する求人が見つかりませんでした: {job_id}")
-                return
 
             time.sleep(1)
-
-            # モーダルを閉じる
-            close_button = self.wait.until(
-                EC.element_to_be_clickable((By.CSS_SELECTOR, "div.js_modalClose"))
-            )
-            self.driver.execute_script("arguments[0].click();", close_button)
-            self.log_window("求人情報モーダルを閉じました")
-            time.sleep(0.5)
 
             # 現住所選択
             if pref_name and pref_name != "選択しない":
-                self.log_window(f"→ 現住所で絞り込み: {pref_name}")
+                self.log_window(f"現住所で絞り込み: {pref_name}")
                 try:
-                    # config から pref_code を取得
                     pref_code = self.pref_name_id_map.get(pref_name)
                     if pref_code:
-                        # ボタンをクリック（都道府県ドロップダウン）
-                        self.wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "div[data-testid='residence-prefecture-select']"))).click()
-                        time.sleep(0.5)
-                        # 選択肢クリック
-                        selector = f"div[data-value='{pref_code}']"
-                        self.wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, selector))).click()
+                        select_element = self.wait.until(
+                            EC.presence_of_element_located((By.ID, "md_select-candidatePrefecture"))
+                        )
+                        Select(select_element).select_by_value(pref_code)
+                        self.log_window(f"現住所選択成功（{pref_name}: {pref_code}）")
                     else:
-                        self.log_window(f"→ 現住所コード取得失敗: {pref_name}")
+                        self.log_window(f"現住所コード取得失敗: {pref_name}")
                 except Exception as e:
-                    self.log_window(f"→ 現住所入力失敗: {e}")
+                    self.log_window(f"現住所選択エラー: {e}")
             else:
-                self.log_window("→ 現住所は未指定のためスキップ")
+                self.log_window("現住所未指定のためスキップ")
 
             # 経験職種選択
             if occ_name and occ_name != "選択しない":
-                self.log_window(f"→ 経験職種で絞り込み: {occ_name}")
+                self.log_window(f"経験職種で絞り込み: {occ_name}")
                 try:
                     occ_code = self.occ_name_id_map.get(occ_name)
                     if occ_code:
-                        self.wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "div[data-testid='occupation-select']"))).click()
-                        time.sleep(0.5)
-                        selector = f"div[data-value='{occ_code}']"
-                        self.wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, selector))).click()
+                        select_element = self.wait.until(
+                            EC.presence_of_element_located((By.ID, "md_select-candidateOccupation"))
+                        )
+                        Select(select_element).select_by_value(occ_code)
+                        self.log_window(f"経験職種選択成功（{occ_name}: {occ_code}）")
                     else:
-                        self.log_window(f"→ 経験職種コード取得失敗: {occ_name}")
+                        self.log_window(f"経験職種コード取得失敗: {occ_name}")
                 except Exception as e:
-                    self.log_window(f"→ 経験職種入力失敗: {e}")
+                    self.log_window(f"経験職種選択エラー: {e}")
             else:
-                self.log_window("→ 経験職種は未指定のためスキップ")
+                self.log_window("経験職種未指定のためスキップ")
 
             # 絞り込みボタン押下
             refine_btn = self.driver.find_element(By.ID, "js_candidateRefinement")
@@ -415,26 +412,39 @@ class EngageApp(tk.Tk):
                 except:
                     break
 
+            approach_count = 0
+            error_count = 0
+
             # 候補者一覧から年齢条件に合う人を抽出して会ってみたい
             candidates = self.driver.find_elements(By.XPATH, '//div[@class="main"]')
-            for candidate in candidates:
-                self.log_window("候補者プロフィールを確認中...")
+            self.log_window(f"候補者一覧取得：{len(candidates)} 名")
+            for idx, candidate in enumerate(candidates):
+                self.log_window(f"[{idx+1}/{len(candidates)}] 候補者プロフィールを確認中...")
                 try:
                     age_elements = candidate.find_elements(By.XPATH, './/span[contains(text(), "歳")]')
                     if not age_elements:
                         continue
                     age_text = age_elements[0].text
                     age = int(age_text.replace("歳", ""))
+                    self.log_window(f"年齢: {age}")
                     if age > int(self.max_age.get()):
+                        self.log_window("スキップ：年齢オーバー")
                         continue
 
-                    profile_button = candidate.find_element(By.XPATH, './/a[contains(@class, "md_btn--detail")]')
-                    self.driver.execute_script("arguments[0].click();", profile_button)
+                    profile_buttons = self.driver.find_elements(By.XPATH, '//a[contains(@class, "md_btn--detail")]')
+                    if not profile_buttons:
+                        self.log_window("プロフィールボタンが見つかりませんでした。スキップします。")
+                        continue
+
+                    # プロフィールを開く
+                    self.driver.execute_script("arguments[0].click();", profile_buttons[0])
                     time.sleep(2)
 
+                    # 「会ってみたいボタン」は詳細画面全体から探す
                     approach_btns = self.driver.find_elements(By.XPATH, '//a[contains(@class, "js_candidateApproach")]')
                     if approach_btns:
                     #    self.driver.execute_script("arguments[0].click();", approach_btns[0])
+                        approach_count += 1
                         self.log_window("会ってみたいボタン押下")
                     else:
                         self.log_window("会ってみたいボタンなし")
@@ -445,6 +455,9 @@ class EngageApp(tk.Tk):
                     time.sleep(1)
                 except Exception as e:
                     self.log_window(f"候補者処理エラー: {e}")
+                    error_count += 1
+            self.log_window(f"条件に合致した件数：{approach_count} 件")
+            self.log_window(f"スキップまたはエラー件数: {error_count} 件")
         except Exception as e:
             self.log_window(f"run_condition_set エラー: {e}")
 
