@@ -63,7 +63,7 @@ class EngageApp(tk.Tk):
         self.date_to = tk.StringVar(value=datetime.now().strftime("%Y-%m-%d"))
 
     def create_first_screen(self):
-        self.geometry("600x200")
+        self.geometry("300x200")
         frame = ttk.Frame(self)
         frame.pack(padx=10, pady=10, fill=tk.BOTH, expand=True)
 
@@ -89,6 +89,8 @@ class EngageApp(tk.Tk):
         ttk.Button(frame, text="ログイン", command=self.on_login_button_click).pack(pady=10)
 
     def on_login_button_click(self):
+        if not self.validate_first_screen():
+            return
         if not self.initialize_driver():
             return
 
@@ -98,7 +100,7 @@ class EngageApp(tk.Tk):
     def initialize_driver(self):
         opts = EdgeOptions()
         opts.add_argument("--start-maximized")
-        #opts.add_argument("--headless=new")
+        opts.add_argument("--headless=new")
         self.driver = webdriver.Edge(service=Service(EdgeChromiumDriverManager().install()), options=opts)
         self.wait = WebDriverWait(self.driver, 5)
         self.driver.get("https://en-gage.net/company/manage/")
@@ -229,7 +231,7 @@ class EngageApp(tk.Tk):
         else:
             print(f"[{now}] {message}")  # 初期画面では print にフォールバック
 
-    def validate_inputs(self):
+    def validate_first_screen(self):
         if not self.company_name.get().strip():
             messagebox.showwarning("入力エラー", "会社名は必須です")
             return False
@@ -239,21 +241,11 @@ class EngageApp(tk.Tk):
         if not self.password.get().strip():
             messagebox.showwarning("入力エラー", "パスワードは必須です")
             return False
+        return True
 
-        if not self.date_from.get().strip():
-            messagebox.showwarning("入力エラー", "実行期間Fromは必須です")
-            return False
-        if not self.date_to.get().strip():
-            messagebox.showwarning("入力エラー", "実行期間Toは必須です")
-            return False
-
-        try:
-            age = int(self.max_age.get().strip())
-            if age <= 0:
-                raise ValueError
-        except:
-            messagebox.showwarning("入力エラー", "候補者年齢は正の整数で入力してください")
-            return False
+    def validate_second_screen(self):
+        from_str = self.date_from.get().strip()
+        to_str = self.date_to.get().strip()
 
         if self.job1.get().strip() == "":
             messagebox.showwarning("入力エラー", "求人情報1は必須です")
@@ -265,10 +257,41 @@ class EngageApp(tk.Tk):
             messagebox.showwarning("入力エラー", "経験職種1は必須です")
             return False
 
+        try:
+            age = int(self.max_age.get().strip())
+            if age <= 0:
+                raise ValueError
+        except:
+            messagebox.showwarning("入力エラー", "候補者年齢は正の整数で入力してください")
+            return False
+
+        if not from_str:
+            messagebox.showwarning("入力エラー", "実行期間Fromは必須です")
+            return False
+        if not to_str:
+            messagebox.showwarning("入力エラー", "実行期間Toは必須です")
+            return False
+
+        try:
+            from_date = datetime.strptime(from_str, "%Y-%m-%d")
+        except ValueError:
+            messagebox.showwarning("入力エラー", f"実行期間Fromの形式または日付が不正です（例: 2025-05-08）")
+            return False
+
+        try:
+            to_date = datetime.strptime(to_str, "%Y-%m-%d")
+        except ValueError:
+            messagebox.showwarning("入力エラー", f"実行期間Toの形式または日付が不正です（例: 2025-05-08）")
+            return False
+
+        if from_date > to_date:
+            messagebox.showwarning("入力エラー", "実行期間FromはToより前の日付にしてください")
+            return False
+
         return True
 
     def start_automation_thread(self):
-        if not self.validate_inputs():
+        if not self.validate_second_screen():
             return
         self.disable_inputs()
         thread = threading.Thread(target=self.run_automation_wrapper, daemon=True)
@@ -282,7 +305,9 @@ class EngageApp(tk.Tk):
             now = datetime.now()
             if now < from_time:
                 wait_minutes = (from_time - now).total_seconds() / 60
-                self.log_window(f"開始時刻まで {int(wait_minutes)} 分待機します...")
+                hours = int(wait_minutes) // 60
+                minutes = int(wait_minutes) % 60
+                self.log_window(f"開始時刻まで {hours}時間{minutes}分 待機します...")
                 time.sleep(wait_minutes * 60)
 
             jobs = [self.job1.get(), self.job2.get(), self.job3.get()]
@@ -291,29 +316,25 @@ class EngageApp(tk.Tk):
 
             loop_count = 0
             while datetime.now() <= to_time:
-                self.log_window(f"{loop_count + 1}回目のループ処理を開始します")
                 for i in range(3):
                     job = jobs[i]
-                    pref = prefs[i]
                     occ = occs[i]
+                    for pref in prefs:
+                        loop_count += 1
+                        self.log_window(f"{loop_count}回目: 求人={job}, 現住所={pref}, 職種={occ} で処理開始")
+                        self.run_condition_set(job, pref, occ)
+                        self.log_window(f"{loop_count}回目: 処理完了")
 
-                    if job == "" or pref == "" or occ == "":
-                        self.log_window(f"{i+1}回目: 入力が不足しているためスキップ（{job}, {pref}, {occ}）")
-                        continue
+                        # if datetime.now() + timedelta(minutes=20) > to_time:
+                        #     return
 
-                    self.log_window(f"{i+1}回目: 求人={job}, 現住所={pref}, 職種={occ} で処理開始")
-                    self.run_condition_set(job, pref, occ)
-                    self.log_window(f"{i+1}回目: 処理完了")
+                        # self.log_window("20分待機します...")
+                        # time.sleep(20 * 60)
+                        if datetime.now() + timedelta(minutes=1) > to_time:
+                            return
 
-                loop_count += 1
-                # if datetime.now() + timedelta(minutes=20) > to_time:
-                #     break
-                # self.log_window("20分待機します...")
-                # time.sleep(20 * 60)
-                if datetime.now() + timedelta(minutes=1) > to_time:
-                    break
-                self.log_window("1分待機します...")
-                time.sleep(1 * 60)
+                        self.log_window("1分待機します...")
+                        time.sleep(1 * 60)
             self.log_window("実行期間終了。処理を終了します。")
         except Exception as e:
             self.log_window(f"処理中にエラー: {e}")
@@ -402,15 +423,19 @@ class EngageApp(tk.Tk):
             time.sleep(2)
 
             # さらに読み込む最大まで
+            show_more_count = 0
             for _ in range(9):
                 try:
                     show_more = WebDriverWait(self.driver, 3).until(
                         EC.element_to_be_clickable((By.ID, "js_candidateShowMore"))
                     )
                     self.driver.execute_script("arguments[0].click();", show_more)
+                    show_more_count += 1
                     time.sleep(2)
                 except:
                     break
+
+            self.log_window(f"『さらに読み込む』ボタンを {show_more_count} 回クリックしました")
 
             approach_count = 0
             error_count = 0
