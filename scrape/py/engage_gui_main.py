@@ -4,6 +4,8 @@ from datetime import datetime
 import threading
 import time
 import json
+import os
+import sys
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait, Select
@@ -13,6 +15,7 @@ from selenium.webdriver.edge.service import Service
 from webdriver_manager.microsoft import EdgeChromiumDriverManager
 from selenium.webdriver.common.action_chains import ActionChains
 from datetime import timedelta
+from datetime import datetime
 from selenium.common.exceptions import TimeoutException
 
 class EngageApp(tk.Tk):
@@ -52,6 +55,8 @@ class EngageApp(tk.Tk):
         self.max_age = tk.StringVar()
         self.date_from = tk.StringVar(value=datetime.now().strftime("%Y-%m-%d"))
         self.date_to = tk.StringVar(value=datetime.now().strftime("%Y-%m-%d"))
+        self.time_from = tk.StringVar(value="00:00")
+        self.time_to = tk.StringVar(value="23:59")
 
     def create_first_screen(self):
         self.geometry("350x200")
@@ -215,12 +220,21 @@ class EngageApp(tk.Tk):
         ttk.Label(age_frame, text="候補者年齢（以下）：").pack(side=tk.LEFT)
         ttk.Entry(age_frame, textvariable=self.max_age, width=10).pack(side=tk.LEFT, padx=5)
 
-        # 実行期間 From/To
-        for label, var in [("実行期間 From（例: 2025-05-08）：", self.date_from), ("実行期間 To（例: 2025-05-08）：", self.date_to)]:
-            f = ttk.Frame(frame)
-            f.pack(anchor="w", pady=5)
-            ttk.Label(f, text=label).pack(side=tk.LEFT)
-            ttk.Entry(f, textvariable=var, width=15).pack(side=tk.LEFT, padx=5)
+        # 実行期間 From（日時）
+        f_from = ttk.Frame(frame)
+        f_from.pack(anchor="w", pady=5)
+        ttk.Label(f_from, text="実行期間 From：").pack(side=tk.LEFT)
+        ttk.Entry(f_from, textvariable=self.date_from, width=12).pack(side=tk.LEFT, padx=(5, 2))
+        ttk.Label(f_from, text="時刻（例: 00:00）").pack(side=tk.LEFT)
+        ttk.Entry(f_from, textvariable=self.time_from, width=6).pack(side=tk.LEFT, padx=5)
+
+        # 実行期間 To（日時）
+        f_to = ttk.Frame(frame)
+        f_to.pack(anchor="w", pady=5)
+        ttk.Label(f_to, text="実行期間 To　：").pack(side=tk.LEFT)
+        ttk.Entry(f_to, textvariable=self.date_to, width=12).pack(side=tk.LEFT, padx=(5, 2))
+        ttk.Label(f_to, text="時刻（例: 23:59）").pack(side=tk.LEFT)
+        ttk.Entry(f_to, textvariable=self.time_to, width=6).pack(side=tk.LEFT, padx=5)
 
         # 実行ボタン
         ttk.Button(frame, text="実行", command=self.start_automation_thread).pack(pady=10)
@@ -230,14 +244,38 @@ class EngageApp(tk.Tk):
         self.log_box.pack(fill=tk.BOTH, expand=True)
 
     def log_window(self, message):
-        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        now = datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
+        full_message = f"{now} {message}"
+
+        # GUIが完成していない場合（＝log_boxがまだない場合）はスキップ
         if hasattr(self, "log_box"):
-            self.log_box.config(state="normal")
-            self.log_box.insert(tk.END, f"[{now}] {message}\n")
-            self.log_box.see(tk.END)
-            self.log_box.config(state="disabled") 
-        else:
-            print(f"[{now}] {message}")  # 初期画面では print にフォールバック
+            try:
+                self.log_box.configure(state='normal')
+                self.log_box.insert(tk.END, full_message + "\n")
+                self.log_box.see(tk.END)
+                self.log_box.configure(state='disabled')
+            except Exception as e:
+                pass  # 念のため補強
+
+        # ファイル出力だけは常に行う
+        try:
+            # exe または .py の実行ファイルが存在するフォルダをベースにする（常に同じ挙動）
+            base_dir = os.path.dirname(os.path.abspath(sys.executable if getattr(sys, 'frozen', False) else __file__))
+            logs_dir = os.path.join(base_dir, "logs")
+
+            # フォルダがなければ作成
+            os.makedirs(logs_dir, exist_ok=True)
+
+            # 日付付きログファイル名
+            log_filename = datetime.now().strftime("engage_log_%Y%m%d.log")
+            log_path = os.path.join(logs_dir, log_filename)
+
+            with open(log_path, "a", encoding="utf-8") as f:
+                f.write(full_message + "\n")
+
+        except Exception as e:
+            # ファイル出力エラーがあっても GUI に出さずに無視
+            pass
 
     def validate_first_screen(self):
         if not self.company_name.get().strip():
@@ -252,8 +290,10 @@ class EngageApp(tk.Tk):
         return True
 
     def validate_second_screen(self):
-        from_str = self.date_from.get().strip()
-        to_str = self.date_to.get().strip()
+        from_date_str = self.date_from.get().strip()
+        from_time_str = self.time_from.get().strip()
+        to_date_str = self.date_to.get().strip()
+        to_time_str = self.time_to.get().strip()
 
         # 1行目はすべて必須
         if not self.job_vars[0].get().strip():
@@ -284,27 +324,31 @@ class EngageApp(tk.Tk):
             messagebox.showwarning("入力エラー", "候補者年齢は正の整数で入力してください")
             return False
 
-        if not from_str:
+        if not from_date_str or not from_time_str:
             messagebox.showwarning("入力エラー", "実行期間Fromは必須です")
             return False
-        if not to_str:
+        if not to_date_str or not to_time_str:
             messagebox.showwarning("入力エラー", "実行期間Toは必須です")
             return False
 
         try:
-            from_date = datetime.strptime(from_str, "%Y-%m-%d")
+            from_dt = datetime.strptime(f"{from_date_str} {from_time_str}", "%Y-%m-%d %H:%M")
         except ValueError:
-            messagebox.showwarning("入力エラー", f"実行期間Fromの形式または日付が不正です（例: 2025-05-08）")
+            messagebox.showwarning("入力エラー", "実行期間Fromの日時が不正です（例: 2025-05-14 00:00）")
             return False
 
         try:
-            to_date = datetime.strptime(to_str, "%Y-%m-%d")
+            to_dt = datetime.strptime(f"{to_date_str} {to_time_str}", "%Y-%m-%d %H:%M")
+            # 現在時刻と比較して過去ならエラー
+            if to_dt < datetime.now():
+                messagebox.showwarning("入力エラー", "実行期間Toは現在日時より後を指定してください")
+                return False
         except ValueError:
-            messagebox.showwarning("入力エラー", f"実行期間Toの形式または日付が不正です（例: 2025-05-08）")
+            messagebox.showwarning("入力エラー", "実行期間Toの日時が不正です（例: 2025-05-14 23:59）")
             return False
 
-        if from_date > to_date:
-            messagebox.showwarning("入力エラー", "実行期間FromはToより前の日付にしてください")
+        if from_dt > to_dt:
+            messagebox.showwarning("入力エラー", "実行期間FromはToより前の日時にしてください")
             return False
 
         return True
@@ -318,10 +362,11 @@ class EngageApp(tk.Tk):
 
     def run_automation(self):
         self.log_window("処理を開始しました。")
-        try:    
-            from_time = datetime.strptime(self.date_from.get().strip() + " 00:00:00", "%Y-%m-%d %H:%M:%S")
-            #to_time = datetime.strptime(self.date_to.get().strip() + " 23:59:59", "%Y-%m-%d %H:%M:%S")
-            to_time = datetime.strptime(self.date_to.get().strip() + " 05:59:59", "%Y-%m-%d %H:%M:%S")
+        try:
+            from_str = f"{self.date_from.get().strip()} {self.time_from.get().strip()}"
+            to_str = f"{self.date_to.get().strip()} {self.time_to.get().strip()}"
+            from_time = datetime.strptime(from_str, "%Y-%m-%d %H:%M")
+            to_time = datetime.strptime(to_str, "%Y-%m-%d %H:%M")
             now = datetime.now()
             if now < from_time:
                 wait_minutes = (from_time - now).total_seconds() / 60
@@ -329,6 +374,15 @@ class EngageApp(tk.Tk):
                 minutes = int(wait_minutes) % 60
                 self.log_window(f"開始時刻まで {hours}時間{minutes}分 待機します...")
                 time.sleep(wait_minutes * 60)
+
+            # 実行直前にページをリフレッシュ
+            self.log_window("開始直前にエンゲージ画面をリフレッシュします...")
+            try:
+                self.driver.refresh()
+                time.sleep(2)
+                self.log_window("リフレッシュ完了")
+            except Exception as e:
+                self.log_window(f"リフレッシュ中にエラー: {e}")
 
             loop_count = 0
             while datetime.now() <= to_time:
@@ -346,18 +400,12 @@ class EngageApp(tk.Tk):
                     self.run_condition_set(job, pref, occ)
                     self.log_window(f"{loop_count}回目: 処理完了")
 
-                    # if datetime.now() + timedelta(minutes=20) > to_time:
-                    #     self.log_window("次の実行でTo時刻を超えるため、終了します。")
-                    #     return
-
-                    # self.log_window("20分待機します...")
-                    # time.sleep(20 * 60)
-                    if datetime.now() + timedelta(minutes=1) > to_time:
+                    if datetime.now() + timedelta(minutes=20) > to_time:
                         self.log_window("次の実行でTo時刻を超えるため、終了します。")
                         return
 
-                    self.log_window("1分待機します...")
-                    time.sleep(1 * 60)
+                    self.log_window("20分待機します...")
+                    time.sleep(20 * 60)
             self.log_window("実行期間終了。処理を終了します。")
         except Exception as e:
             self.log_window(f"処理中にエラー: {e}")
@@ -400,7 +448,7 @@ class EngageApp(tk.Tk):
 
                         break
             else:
-                self.log_window(f"求人IDが見つかりませんでした: {job_name}")
+                self.log_window("求人情報未指定のためスキップ")
 
             time.sleep(1)
 
@@ -491,7 +539,7 @@ class EngageApp(tk.Tk):
                     # 「会ってみたいボタン」は詳細画面全体から探す
                     approach_btns = self.driver.find_elements(By.XPATH, '//a[contains(@class, "js_candidateApproach")]')
                     if approach_btns:
-                    #    self.driver.execute_script("arguments[0].click();", approach_btns[0])
+                        self.driver.execute_script("arguments[0].click();", approach_btns[0])
                         approach_count += 1
                         self.log_window("会ってみたいボタン押下")
                     else:
