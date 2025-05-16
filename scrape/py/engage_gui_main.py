@@ -46,43 +46,34 @@ class EngageApp(tk.Tk):
         self.company_name = tk.StringVar()
         self.email = tk.StringVar()
         self.password = tk.StringVar()
-        self.job1 = tk.StringVar()
-        self.job2 = tk.StringVar()
-        self.job3 = tk.StringVar()
-        self.job_vars = [self.job1, self.job2, self.job3]
-        self.pref1 = tk.StringVar()
-        self.pref2 = tk.StringVar()
-        self.pref3 = tk.StringVar()
-        self.pref_vars = [self.pref1, self.pref2, self.pref3]
-        self.occ1 = tk.StringVar()
-        self.occ2 = tk.StringVar()
-        self.occ3 = tk.StringVar()
-        self.occ_vars = [self.occ1, self.occ2, self.occ3]
+        self.job_vars = [tk.StringVar() for _ in range(6)]
+        self.pref_vars = [tk.StringVar() for _ in range(6)]
+        self.occ_vars = [tk.StringVar() for _ in range(6)]
         self.max_age = tk.StringVar()
         self.date_from = tk.StringVar(value=datetime.now().strftime("%Y-%m-%d"))
         self.date_to = tk.StringVar(value=datetime.now().strftime("%Y-%m-%d"))
 
     def create_first_screen(self):
-        self.geometry("300x200")
+        self.geometry("350x200")
         frame = ttk.Frame(self)
         frame.pack(padx=10, pady=10, fill=tk.BOTH, expand=True)
 
         # 会社名
         row1 = ttk.Frame(frame)
         row1.pack(anchor=tk.W, pady=5)
-        ttk.Label(row1, text="会社名:", width=10).pack(side=tk.LEFT)
+        ttk.Label(row1, text="会社名:", width=11).pack(side=tk.LEFT)
         ttk.Entry(row1, textvariable=self.company_name, width=30).pack(side=tk.LEFT, padx=5)
 
         # メールアドレス
         row2 = ttk.Frame(frame)
         row2.pack(anchor=tk.W, pady=5)
-        ttk.Label(row2, text="メールアドレス:", width=10).pack(side=tk.LEFT)
+        ttk.Label(row2, text="メールアドレス:", width=11).pack(side=tk.LEFT)
         ttk.Entry(row2, textvariable=self.email, width=30).pack(side=tk.LEFT, padx=5)
 
         # パスワード
         row3 = ttk.Frame(frame)
         row3.pack(anchor=tk.W, pady=5)
-        ttk.Label(row3, text="パスワード:", width=10).pack(side=tk.LEFT)
+        ttk.Label(row3, text="パスワード:", width=11).pack(side=tk.LEFT)
         ttk.Entry(row3, textvariable=self.password, width=30, show="*").pack(side=tk.LEFT, padx=5)
 
         # ログインボタン
@@ -183,7 +174,7 @@ class EngageApp(tk.Tk):
             self.close_popups()
 
     def create_second_screen(self):
-        self.geometry("1000x600")
+        self.geometry("800x600")
         self.clear_screen()
         frame = ttk.Frame(self)
         frame.pack(padx=10, pady=10, fill=tk.BOTH, expand=True)
@@ -194,12 +185,29 @@ class EngageApp(tk.Tk):
         input_frame = ttk.Frame(frame)
         input_frame.pack(anchor="w")
 
-        # 求人情報
-        self.add_label_combobox_row(frame, "求人情報", self.job_vars, self.job_titles, self.job_combo_list)
-        # 現住所
-        self.add_label_combobox_row(frame, "現住所", self.pref_vars, self.pref_names, self.pref_combo_list)
-        # 経験職種
-        self.add_label_combobox_row(frame, "経験職種", self.occ_vars, self.occ_names, self.occ_combo_list)
+        # 条件入力（求人・現住所・職種を1行に並べる）
+        ttk.Label(frame, text="【条件設定】", font=("Arial", 12, "bold")).pack(anchor="w", pady=(10, 5))
+        for i in range(6):
+            row = ttk.Frame(frame)
+            row.pack(anchor="w", pady=3)
+
+            # 求人情報
+            ttk.Label(row, text=f"求人情報{i+1}:", width=10).pack(side=tk.LEFT)
+            job_cb = ttk.Combobox(row, textvariable=self.job_vars[i], values=self.job_titles, width=30)
+            job_cb.pack(side=tk.LEFT, padx=(0, 10))
+            self.job_combo_list.append(job_cb)
+
+            # 現住所
+            ttk.Label(row, text=f"現住所{i+1}:", width=10).pack(side=tk.LEFT)
+            pref_cb = ttk.Combobox(row, textvariable=self.pref_vars[i], values=self.pref_names, width=20)
+            pref_cb.pack(side=tk.LEFT, padx=(0, 10))
+            self.pref_combo_list.append(pref_cb)
+
+            # 経験職種
+            ttk.Label(row, text=f"経験職種{i+1}:", width=10).pack(side=tk.LEFT)
+            occ_cb = ttk.Combobox(row, textvariable=self.occ_vars[i], values=self.occ_names, width=20)
+            occ_cb.pack(side=tk.LEFT, padx=(0, 10))
+            self.occ_combo_list.append(occ_cb)
 
         # 候補者年齢
         age_frame = ttk.Frame(frame)
@@ -247,15 +255,26 @@ class EngageApp(tk.Tk):
         from_str = self.date_from.get().strip()
         to_str = self.date_to.get().strip()
 
-        if self.job1.get().strip() == "":
+        # 1行目はすべて必須
+        if not self.job_vars[0].get().strip():
             messagebox.showwarning("入力エラー", "求人情報1は必須です")
             return False
-        if self.pref1.get().strip() == "":
+        if not self.pref_vars[0].get().strip():
             messagebox.showwarning("入力エラー", "現住所1は必須です")
             return False
-        if self.occ1.get().strip() == "":
+        if not self.occ_vars[0].get().strip():
             messagebox.showwarning("入力エラー", "経験職種1は必須です")
             return False
+
+        # 2～6行目は条件付き必須
+        for i in range(1, 6):
+            job = self.job_vars[i].get().strip()
+            pref = self.pref_vars[i].get().strip()
+            occ = self.occ_vars[i].get().strip()
+            filled = sum(bool(x) for x in [job, pref, occ])
+            if 0 < filled < 3:
+                messagebox.showwarning("入力エラー", f"{i+1}行目はいずれかが入力されているため、全て入力が必要です")
+                return False
 
         try:
             age = int(self.max_age.get().strip())
@@ -301,7 +320,8 @@ class EngageApp(tk.Tk):
         self.log_window("処理を開始しました。")
         try:    
             from_time = datetime.strptime(self.date_from.get().strip() + " 00:00:00", "%Y-%m-%d %H:%M:%S")
-            to_time = datetime.strptime(self.date_to.get().strip() + " 23:59:59", "%Y-%m-%d %H:%M:%S")
+            #to_time = datetime.strptime(self.date_to.get().strip() + " 23:59:59", "%Y-%m-%d %H:%M:%S")
+            to_time = datetime.strptime(self.date_to.get().strip() + " 05:59:59", "%Y-%m-%d %H:%M:%S")
             now = datetime.now()
             if now < from_time:
                 wait_minutes = (from_time - now).total_seconds() / 60
@@ -310,31 +330,34 @@ class EngageApp(tk.Tk):
                 self.log_window(f"開始時刻まで {hours}時間{minutes}分 待機します...")
                 time.sleep(wait_minutes * 60)
 
-            jobs = [self.job1.get(), self.job2.get(), self.job3.get()]
-            prefs = [self.pref1.get(), self.pref2.get(), self.pref3.get()]
-            occs  = [self.occ1.get(), self.occ2.get(), self.occ3.get()]
-
             loop_count = 0
             while datetime.now() <= to_time:
-                for i in range(3):
-                    job = jobs[i]
-                    occ = occs[i]
-                    for pref in prefs:
-                        loop_count += 1
-                        self.log_window(f"{loop_count}回目: 求人={job}, 現住所={pref}, 職種={occ} で処理開始")
-                        self.run_condition_set(job, pref, occ)
-                        self.log_window(f"{loop_count}回目: 処理完了")
+                for i in range(6):
+                    job = self.job_vars[i].get().strip()
+                    pref = self.pref_vars[i].get().strip()
+                    occ  = self.occ_vars[i].get().strip()
 
-                        # if datetime.now() + timedelta(minutes=20) > to_time:
-                        #     return
+                    # 未設定行はスキップ
+                    if not all([job, pref, occ]):
+                        continue
 
-                        # self.log_window("20分待機します...")
-                        # time.sleep(20 * 60)
-                        if datetime.now() + timedelta(minutes=1) > to_time:
-                            return
+                    loop_count += 1
+                    self.log_window(f"{loop_count}回目: 求人={job}, 現住所={pref}, 職種={occ} で処理開始")
+                    self.run_condition_set(job, pref, occ)
+                    self.log_window(f"{loop_count}回目: 処理完了")
 
-                        self.log_window("1分待機します...")
-                        time.sleep(1 * 60)
+                    # if datetime.now() + timedelta(minutes=20) > to_time:
+                    #     self.log_window("次の実行でTo時刻を超えるため、終了します。")
+                    #     return
+
+                    # self.log_window("20分待機します...")
+                    # time.sleep(20 * 60)
+                    if datetime.now() + timedelta(minutes=1) > to_time:
+                        self.log_window("次の実行でTo時刻を超えるため、終了します。")
+                        return
+
+                    self.log_window("1分待機します...")
+                    time.sleep(1 * 60)
             self.log_window("実行期間終了。処理を終了します。")
         except Exception as e:
             self.log_window(f"処理中にエラー: {e}")
