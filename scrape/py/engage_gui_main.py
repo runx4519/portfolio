@@ -14,12 +14,18 @@ from webdriver_manager.microsoft import EdgeChromiumDriverManager
 from selenium.webdriver.common.action_chains import ActionChains
 from datetime import timedelta
 from selenium.common.exceptions import TimeoutException
+from selenium.webdriver.common.keys import Keys
 
 class EngageApp(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("Engage 自動化ツール")
         self.job_titles = []
+
+        self.job_combo_list = []
+        self.pref_combo_list = []
+        self.occ_combo_list = []
+
         self.load_config_options()
         self.create_variables()
         self.create_first_screen()
@@ -28,8 +34,14 @@ class EngageApp(tk.Tk):
     def load_config_options(self):
         with open("config_options.json", "r", encoding="utf-8") as f:
             data = json.load(f)
-            self.pref_options = list(data["prefectures"].values())
-            self.occ_options = list(data["occupations"].values())
+
+        # 名称リスト（プルダウン表示用）
+        self.pref_names = list(data["prefectures"].keys())
+        self.occ_names  = list(data["occupations"].keys())
+
+        # 名称 → ID 辞書（検索条件用）
+        self.pref_name_id_map = {v: k for k, v in data["prefectures"].items()}
+        self.occ_name_id_map  = {v: k for k, v in data["occupations"].items()}
 
     def create_variables(self):
         self.company_name = tk.StringVar()
@@ -38,12 +50,15 @@ class EngageApp(tk.Tk):
         self.job1 = tk.StringVar()
         self.job2 = tk.StringVar()
         self.job3 = tk.StringVar()
+        self.job_vars = [self.job1, self.job2, self.job3]
         self.pref1 = tk.StringVar()
         self.pref2 = tk.StringVar()
         self.pref3 = tk.StringVar()
+        self.pref_vars = [self.pref1, self.pref2, self.pref3]
         self.occ1 = tk.StringVar()
         self.occ2 = tk.StringVar()
         self.occ3 = tk.StringVar()
+        self.occ_vars = [self.occ1, self.occ2, self.occ3]
         self.max_age = tk.StringVar()
         self.date_from = tk.StringVar(value=datetime.now().strftime("%Y-%m-%d"))
         self.date_to = tk.StringVar(value=datetime.now().strftime("%Y-%m-%d"))
@@ -107,113 +122,64 @@ class EngageApp(tk.Tk):
                 self.log_window("リロードでポップアップ抑制を試行中...")
                 time.sleep(2)
 
-                try:
-                    modal_close = self.driver.find_element(By.CSS_SELECTOR, "a.js_modalX.js_modalXChain")
-                    self.driver.execute_script("arguments[0].click();", modal_close)
-                    self.log_window("ポップアップを js_modalX で閉じました。")
-                    time.sleep(1)
-                except Exception:
-                    self.log_window("js_modalX が見つかりませんでした（ポップアップ非表示とみなす）")
+                # 再リロードで両ポップアップをまとめて閉じる
+                self.driver.get("https://en-gage.net/company/manage/")
+                self.log_window("ポップアップ類をまとめてリロードで閉じました")
+                time.sleep(2)
 
-                self.close_popups()
-                
                 return True
 
     def close_popups(self):
-        self.log_window("ポップアップ閉じ処理開始")
+        self.log_window("ポップアップ非表示処理を実行中")
         try:
-            close_buttons = self.driver.find_elements(By.CLASS_NAME, "js_modalClose")
-            if not close_buttons:
-                self.log_window("ポップアップは検出されませんでした（スキップ）")
-                return  # 無駄なループを回避
-
-            retry_outer = 0
-            while retry_outer < 5:
-                for btn in close_buttons:
-                    retry_inner = 0
-                    while retry_inner < 3:
-                        try:
-                            self.driver.execute_script("arguments[0].scrollIntoView(true);", btn)
-                            self.driver.execute_script("arguments[0].style.pointerEvents = 'auto';", btn)
-                            self.driver.execute_script("arguments[0].click();", btn)
-                            time.sleep(1)
-                            break
-                        except Exception as e:
-                            retry_inner += 1
-                            self.log_window(f"✖クリックリトライ{retry_inner}回目失敗: {e}")
-                            time.sleep(1)
-                    else:
-                        self.log_window("✖ボタン押下3回失敗、次へ進みます。")
-                retry_outer += 1
-                time.sleep(1)
-            else:
-                self.log_window("ポップアップ閉じ処理を5回リトライしてもボタンが残っていました。")
-            self.log_window("ポップアップ閉じ処理完了")
-        except Exception as e:
-            self.log_window(f"ポップアップ閉じ処理中にエラー: {e}")
-
             self.driver.execute_script("""
                 const modals = document.querySelectorAll(
                     '.modal, .modalContainer, .js_modalXChain, .js_modalClose, .overlay, [class*="modal"]'
                 );
                 modals.forEach(el => {
-                    // js_modalOpen（求人ボタン）だけは残す
                     if (!el.classList.contains('js_modalOpen')) {
                         el.style.display = 'none';
                         el.style.pointerEvents = 'none';
-                        el.remove();
                     }
                 });
+                document.body.style.overflow = 'auto';
             """)
-
-            self.log_window("モーダル非表示成功")
+            self.log_window("全ポップアップを非表示にしました")
         except Exception as e:
-            self.log_window(f"モーダル非表示失敗: {e}")
+            self.log_window(f"ポップアップ非表示中にエラー: {e}")
 
     def get_job_titles(self):
         try:
-            self.close_popups()
-
-            # 背面レイヤーが残っていないか確認して消えるまで待つ
-            try:
-                WebDriverWait(self.driver, 5).until_not(
-                    EC.presence_of_element_located((By.CLASS_NAME, "js_modalXChain"))
-                )
-            except:
-                pass
-
-            # 求人モーダルボタンを確実にクリック（scrollIntoView付き）
             modal_button = self.wait.until(
                 EC.element_to_be_clickable((By.CSS_SELECTOR, "div.switch.js_modalOpen"))
             )
             self.driver.execute_script("arguments[0].scrollIntoView(true);", modal_button)
             self.driver.execute_script("arguments[0].click();", modal_button)
+            self.log_window("求人情報モーダルを開きました")
             time.sleep(1)
 
-            # 求人タイトル一覧を取得
             job_elements = self.wait.until(
                 EC.presence_of_all_elements_located((By.CSS_SELECTOR, "a.js_optionWorkId"))
             )
-            self.job_titles = ["選択しない"] + [job.text for job in job_elements]
 
-            # 求人情報取得処理のあと
-            print("求人タイトル取得完了。モーダル閉じ開始")
-            # 確認後すぐ処理継続
-            time.sleep(1)
+            job_map = {}
+            for job in job_elements:
+                job_text = job.text.strip()
+                job_id = job.get_attribute("data-work_id")
+                if job_text and job_id:
+                    title_line = job_text.splitlines()[0]
+                    display_title = f"【{job_id}】{title_line}"
+                    job_map[display_title] = job_id
 
-            # 求人情報ポップアップは F5 リロードで閉じる（確実に消えるならこの方法が安定）
-            try:
-                self.driver.get("https://en-gage.net/company/manage/")
-                self.log_window("求人情報ポップアップをリロードで強制非表示にしました。")
-                time.sleep(2)
-            except Exception as e:
-                self.log_window(f"リロードによる求人情報ポップアップ非表示失敗: {e}")
-        except Exception as e:
-            messagebox.showerror("エラー", f"求人情報の取得に失敗しました: {e}")
-        # モーダルを安定して閉じる
-        self.close_popups()
-        # 2画面目を表示（求人情報取得完了後）
-        self.create_second_screen()
+            self.job_title_id_map = job_map
+            self.job_titles = ["選択しない"] + list(job_map.keys())
+
+            self.log_window(f"求人情報 {len(job_map)} 件取得完了")
+            self.close_popups()
+
+        except TimeoutException:
+            self.log_window("求人情報取得に失敗しました（Timeout）")
+            self.close_popups()
 
     def create_second_screen(self):
         self.geometry("1000x600")
@@ -228,11 +194,11 @@ class EngageApp(tk.Tk):
         input_frame.pack(anchor="w")
 
         # 求人情報
-        self.add_label_combobox_row(input_frame, "求人情報", [self.job1, self.job2, self.job3], self.job_titles, row_start=0)
+        self.add_label_combobox_row(frame, "求人情報", self.job_vars, self.job_titles, self.job_combo_list)
         # 現住所
-        self.add_label_combobox_row(input_frame, "現住所", [self.pref1, self.pref2, self.pref3], self.pref_options, row_start=1)
+        self.add_label_combobox_row(frame, "現住所", self.pref_vars, self.pref_names, self.pref_combo_list)
         # 経験職種
-        self.add_label_combobox_row(input_frame, "経験職種", [self.occ1, self.occ2, self.occ3], self.occ_options, row_start=2)
+        self.add_label_combobox_row(frame, "経験職種", self.occ_vars, self.occ_names, self.occ_combo_list)
 
         # 候補者年齢
         age_frame = ttk.Frame(frame)
@@ -329,6 +295,9 @@ class EngageApp(tk.Tk):
                     job = jobs[i]
                     pref = prefs[i]
                     occ = occs[i]
+
+                    self.log_window(f"[DEBUG] 条件{i+1}: {job}, {pref}, {occ}")
+
                     if "選択しない" in (job, pref, occ):
                         self.log_window(f"{i+1}回目: 条件が不完全なためスキップ（{job}, {pref}, {occ}）")
                         continue
@@ -348,26 +317,87 @@ class EngageApp(tk.Tk):
         self.log_window("処理を終了しました。")
 
     def run_condition_set(self, job_name, pref_name, occ_name):
-        self.log_window(f"▶ 条件: {job_name} × {pref_name} × {occ_name} を処理中...")
+        self.log_window(f"条件: {job_name} × {pref_name} × {occ_name} を処理中...")
         try:
-            # 求人選択
-            self.wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "div.switch.js_modalOpen"))).click()
+            # 求人IDを取得
+            job_id = self.job_title_id_map.get(job_name)
+            if not job_id:
+                self.log_window(f"求人IDが見つかりませんでした: {job_name}")
+                return
+
+            # 求人情報モーダルを開く
+            modal_button = self.wait.until(
+                EC.element_to_be_clickable((By.CSS_SELECTOR, "div.switch.js_modalOpen"))
+            )
+            self.driver.execute_script("arguments[0].click();", modal_button)
+            self.log_window("求人情報モーダルを開きました")
             time.sleep(1)
-            job_elements = self.wait.until(EC.presence_of_all_elements_located((By.CSS_SELECTOR, "a.js_optionWorkId")))
-            for job in job_elements:
-                if job.text == job_name:
+
+            # 求人一覧を取得してID一致で自動選択
+            job_elements = self.wait.until(
+                EC.presence_of_all_elements_located((By.CSS_SELECTOR, "a.js_optionWorkId"))
+            )
+            found = False
+            for i, job in enumerate(job_elements):
+                job_text = job.text.strip()
+                data_id = job.get_attribute("data-work_id")
+                self.log_window(f"取得求人候補[{i+1}]: {job_text}（ID: {data_id}）")
+                if data_id == job_id:
                     self.driver.execute_script("arguments[0].click();", job)
+                    self.log_window(f"求人を選択: {job_text}")
+                    found = True
                     break
+
+            if not found:
+                self.log_window(f"求人IDが一致する求人が見つかりませんでした: {job_id}")
+                return
+
             time.sleep(1)
 
-            # 現住所と経験職種の選択
-            pref_select = Select(self.driver.find_element(By.ID, "md_select-candidatePrefecture"))
-            pref_select.select_by_visible_text(pref_name)
+            # モーダルを閉じる
+            close_button = self.wait.until(
+                EC.element_to_be_clickable((By.CSS_SELECTOR, "div.js_modalClose"))
+            )
+            self.driver.execute_script("arguments[0].click();", close_button)
+            self.log_window("求人情報モーダルを閉じました")
             time.sleep(0.5)
 
-            occ_select = Select(self.driver.find_element(By.ID, "md_select-candidateOccupation"))
-            occ_select.select_by_visible_text(occ_name)
-            time.sleep(0.5)
+            # 現住所選択
+            if pref_name and pref_name != "選択しない":
+                self.log_window(f"→ 現住所で絞り込み: {pref_name}")
+                try:
+                    # config から pref_code を取得
+                    pref_code = self.pref_name_id_map.get(pref_name)
+                    if pref_code:
+                        # ボタンをクリック（都道府県ドロップダウン）
+                        self.wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "div[data-testid='residence-prefecture-select']"))).click()
+                        time.sleep(0.5)
+                        # 選択肢クリック
+                        selector = f"div[data-value='{pref_code}']"
+                        self.wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, selector))).click()
+                    else:
+                        self.log_window(f"→ 現住所コード取得失敗: {pref_name}")
+                except Exception as e:
+                    self.log_window(f"→ 現住所入力失敗: {e}")
+            else:
+                self.log_window("→ 現住所は未指定のためスキップ")
+
+            # 経験職種選択
+            if occ_name and occ_name != "選択しない":
+                self.log_window(f"→ 経験職種で絞り込み: {occ_name}")
+                try:
+                    occ_code = self.occ_name_id_map.get(occ_name)
+                    if occ_code:
+                        self.wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "div[data-testid='occupation-select']"))).click()
+                        time.sleep(0.5)
+                        selector = f"div[data-value='{occ_code}']"
+                        self.wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, selector))).click()
+                    else:
+                        self.log_window(f"→ 経験職種コード取得失敗: {occ_name}")
+                except Exception as e:
+                    self.log_window(f"→ 経験職種入力失敗: {e}")
+            else:
+                self.log_window("→ 経験職種は未指定のためスキップ")
 
             # 絞り込みボタン押下
             refine_btn = self.driver.find_element(By.ID, "js_candidateRefinement")
@@ -421,6 +451,11 @@ class EngageApp(tk.Tk):
     def disable_inputs(self):
         for child in self.winfo_children():
             for widget in child.winfo_children():
+                for sub_widget in widget.winfo_children():
+                    try:
+                        sub_widget.configure(state="disabled")
+                    except:
+                        pass
                 try:
                     widget.configure(state="disabled")
                 except:
@@ -429,6 +464,11 @@ class EngageApp(tk.Tk):
     def enable_inputs(self):
         for child in self.winfo_children():
             for widget in child.winfo_children():
+                for sub_widget in widget.winfo_children():
+                    try:
+                        sub_widget.configure(state="normal")
+                    except:
+                        pass
                 try:
                     widget.configure(state="normal")
                 except:
@@ -452,10 +492,18 @@ class EngageApp(tk.Tk):
         for widget in self.winfo_children():
             widget.destroy()
 
-    def add_label_combobox_row(self, parent, label_prefix, variables, values, row_start):
+    def add_label_combobox_row(self, parent, label_prefix, variables, values, combo_list):
+        row = ttk.Frame(parent)
+        row.pack(anchor="w", pady=5)
+
         for i, var in enumerate(variables):
-            ttk.Label(parent, text=f"{label_prefix} {i+1}:").grid(row=row_start, column=i*2, sticky="w", padx=5, pady=5)
-            ttk.Combobox(parent, textvariable=var, values=values, width=35).grid(row=row_start, column=i*2+1, padx=5, pady=5)
+            label = ttk.Label(row, text=f"{label_prefix} {i+1}:", width=12, anchor="w")
+            label.pack(side=tk.LEFT)
+
+            combo = ttk.Combobox(row, textvariable=var, values=values, width=35)
+            combo.pack(side=tk.LEFT, padx=10)
+
+            combo_list.append(combo)
 
 if __name__ == "__main__":
     app = EngageApp()
