@@ -64,28 +64,30 @@ class EngageApp(tk.Tk):
         ttk.Button(frame, text="ログイン", command=self.initialize_driver).pack(pady=10)
 
     def initialize_driver(self):
+        opts = EdgeOptions()
+        opts.add_argument("--start-maximized")
+        #opts.add_argument("--headless=new")
+        self.driver = webdriver.Edge(service=Service(EdgeChromiumDriverManager().install()), options=opts)
+        self.wait = WebDriverWait(self.driver, 5)
+        self.driver.get("https://en-gage.net/company/manage/")
+
+        if "login" in self.driver.current_url:
+            self.wait.until(EC.presence_of_element_located((By.ID, "loginID"))).send_keys(self.email.get())
+            self.driver.find_element(By.ID, "password").send_keys(self.password.get())
+            self.driver.find_element(By.ID, "login-button").click()
+
         try:
-            opts = EdgeOptions()
-            opts.add_argument("--start-maximized")
-            #opts.add_argument("--headless=new")
-            self.driver = webdriver.Edge(service=Service(EdgeChromiumDriverManager().install()), options=opts)
-            self.wait = WebDriverWait(self.driver, 10)
             self.driver.get("https://en-gage.net/company/manage/")
+            self.log_window("リロードでポップアップ抑制を試行中...")
+            time.sleep(2)
 
-            if "login" in self.driver.current_url:
-                self.wait.until(EC.presence_of_element_located((By.ID, "loginID"))).send_keys(self.email.get())
-                self.driver.find_element(By.ID, "password").send_keys(self.password.get())
-                self.driver.find_element(By.ID, "login-button").click()
-
-            # ログイン後、最初のポップアップを body 背景クリックで閉じる
             try:
-                self.log_window("最初のポップアップを座標(400, 400)でクリックします")
-                time.sleep(2)  # モーダル表示の待機
-                ActionChains(self.driver).move_by_offset(400, 400).click().perform()
+                modal_close = self.driver.find_element(By.CSS_SELECTOR, "a.js_modalX.js_modalXChain")
+                self.driver.execute_script("arguments[0].click();", modal_close)
+                self.log_window("ポップアップを js_modalX で閉じました。")
                 time.sleep(1)
-                self.log_window("最初のポップアップを閉じました")
-            except Exception as e:
-                self.log_window(f"最初のポップアップ閉じ失敗: {e}")
+            except Exception:
+                self.log_window("js_modalX が見つかりませんでした（ポップアップ非表示とみなす）")
 
             self.close_popups()
             self.get_job_titles()
@@ -97,11 +99,13 @@ class EngageApp(tk.Tk):
     def close_popups(self):
         self.log_window("ポップアップ閉じ処理開始")
         try:
+            close_buttons = self.driver.find_elements(By.CLASS_NAME, "js_modalClose")
+            if not close_buttons:
+                self.log_window("ポップアップは検出されませんでした（スキップ）")
+                return  # 無駄なループを回避
+
             retry_outer = 0
             while retry_outer < 5:
-                close_buttons = self.driver.find_elements(By.CLASS_NAME, "js_modalClose")
-                if not close_buttons:
-                    break
                 for btn in close_buttons:
                     retry_inner = 0
                     while retry_inner < 3:
@@ -171,32 +175,22 @@ class EngageApp(tk.Tk):
 
             # 求人情報取得処理のあと
             print("求人タイトル取得完了。モーダル閉じ開始")
-            # 明示的に 3 秒待ってから閉じる（確認用）
-            time.sleep(3)
+            # 確認後すぐ処理継続
+            time.sleep(1)
 
-            # モーダルを閉じる（求人モーダルのオーバーレイ背景をクリック）
+            # 求人情報ポップアップは F5 リロードで閉じる（確実に消えるならこの方法が安定）
             try:
-                # ページ全体の body 要素を使って2回クリック
-                body = self.driver.find_element(By.TAG_NAME, "body")
-                for _ in range(2):
-                    ActionChains(self.driver).move_to_element_with_offset(body, 10, 10).click().perform()
-                    time.sleep(0.5)
-                self.log_window("求人モーダルを body 背景クリックで閉じました。")
+                self.driver.get("https://en-gage.net/company/manage/")
+                self.log_window("求人情報ポップアップをリロードで強制非表示にしました。")
+                time.sleep(2)
             except Exception as e:
-                self.log_window(f"求人モーダル背景クリックでエラー: {e}")
-            # 求人モーダルの × ボタンを直接クリックして閉じる
-            try:
-                close_button = self.wait.until(
-                    EC.element_to_be_clickable((By.CSS_SELECTOR, ".js_modalX .js_modalClose"))
-                )
-                self.driver.execute_script("arguments[0].click();", close_button)
-                self.log_window("求人モーダルを × ボタンで閉じました。")
-            except Exception as e:
-                self.log_window(f"求人モーダルの × ボタンでの閉じに失敗しました: {e}")
+                self.log_window(f"リロードによる求人情報ポップアップ非表示失敗: {e}")
         except Exception as e:
             messagebox.showerror("エラー", f"求人情報の取得に失敗しました: {e}")
         # モーダルを安定して閉じる
         self.close_popups()
+        # 2画面目を表示（求人情報取得完了後）
+        self.create_second_screen()
 
     def create_second_screen(self):
         for widget in self.winfo_children():
