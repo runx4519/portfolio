@@ -28,6 +28,7 @@ public class ConvertToLocalDate {
 						.with(wf.dayOfWeek(), DayOfWeek.MONDAY.getValue());
 				
 			}
+			System.out.println("topic2追加");
 			System.out.println(ld);
 		} catch (DateTimeException e) {
 			System.out.println("日付変換エラー");
